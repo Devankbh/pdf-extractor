@@ -36,17 +36,22 @@ async def extract_grid(file: UploadFile = File(...)):
             })
 
         # -------------------------
-        # STEP 2: LOGICAL GRID (ROWS)
+        # STEP 2: LOGICAL GRID (IMPROVED)
         # -------------------------
-        rows = []
 
-        for word in blocks:
+        # Sort words top → bottom first
+        blocks_sorted = sorted(blocks, key=lambda w: w["bbox"]["y"])
+
+        rows = []
+        threshold = 8  # tweak if needed
+
+        for word in blocks_sorted:
             y = word["bbox"]["y"]
 
             placed = False
 
             for row in rows:
-                if abs(row["y"] - y) < 10:
+                if abs(row["y"] - y) <= threshold:
                     row["words"].append(word)
                     placed = True
                     break
@@ -57,10 +62,10 @@ async def extract_grid(file: UploadFile = File(...)):
                     "words": [word]
                 })
 
+        # Now sort each row left → right
         logical_grid = []
 
-        for i, row in enumerate(sorted(rows, key=lambda r: r["y"])):
-
+        for i, row in enumerate(rows):
             sorted_words = sorted(row["words"], key=lambda w: w["bbox"]["x"])
 
             logical_grid.append({
