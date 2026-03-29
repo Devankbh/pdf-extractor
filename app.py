@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File
-import fitz
+import fitz  # PyMuPDF
 
 app = FastAPI()
 
@@ -9,10 +9,13 @@ async def extract_grid(file: UploadFile = File(...)):
     contents = await file.read()
     doc = fitz.open(stream=contents, filetype="pdf")
 
-    all_pages = []
+    response_pages = []
 
     for page_num, page in enumerate(doc):
 
+        # -------------------------
+        # STEP 1: WORD EXTRACTION
+        # -------------------------
         words_raw = page.get_text("words")
 
         blocks = []
@@ -23,6 +26,7 @@ async def extract_grid(file: UploadFile = File(...)):
             blocks.append({
                 "id": f"p{page_num}_w{i}",
                 "text": text,
+                "page": page_num + 1,
                 "bbox": {
                     "x": x0,
                     "y": y0,
@@ -32,7 +36,7 @@ async def extract_grid(file: UploadFile = File(...)):
             })
 
         # -------------------------
-        # LOGICAL GRID (ROWS)
+        # STEP 2: LOGICAL GRID (ROWS)
         # -------------------------
         rows = []
 
@@ -65,7 +69,7 @@ async def extract_grid(file: UploadFile = File(...)):
             })
 
         # -------------------------
-        # PIXEL GRID (UI)
+        # STEP 3: PIXEL GRID (UI)
         # -------------------------
         pixel_grid = []
 
@@ -76,7 +80,10 @@ async def extract_grid(file: UploadFile = File(...)):
                 "bbox": word["bbox"]
             })
 
-        all_pages.append({
+        # -------------------------
+        # FINAL RESPONSE PER PAGE
+        # -------------------------
+        response_pages.append({
             "page": page_num + 1,
             "blocks": blocks,
             "logical_grid": logical_grid,
@@ -84,5 +91,5 @@ async def extract_grid(file: UploadFile = File(...)):
         })
 
     return {
-        "pages": all_pages
+        "pages": response_pages
     }
