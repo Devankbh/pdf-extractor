@@ -3,14 +3,11 @@ import fitz  # PyMuPDF
 
 app = FastAPI()
 
-# -------------------------
-# 🔥 GRID SIZE
-# -------------------------
 GRID_SIZE = 20
 
 
 # -------------------------
-# 🟦 BUILD FULL GRID
+# GRID BUILD
 # -------------------------
 def build_full_grid(page_width, page_height):
     rows = int(page_height // GRID_SIZE) + 1
@@ -36,9 +33,9 @@ def build_full_grid(page_width, page_height):
 
 
 # -------------------------
-# 🟨 FINAL MAPPING (ROBUST)
+# 🔥 FINAL MAPPING (RECTANGLE → GRID RANGE)
 # -------------------------
-def map_words_to_grid(blocks, grid):
+def map_words_to_grid(blocks, grid, rows, cols):
 
     for word in blocks:
         x = word["bbox"]["x"]
@@ -46,24 +43,28 @@ def map_words_to_grid(blocks, grid):
         w = word["bbox"]["width"]
         h = word["bbox"]["height"]
 
-        # 🔥 use word rectangle (not just center)
-        for cell in grid:
-            cx = cell["bbox"]["x"]
-            cy = cell["bbox"]["y"]
-            cw = cell["bbox"]["width"]
-            ch = cell["bbox"]["height"]
+        # 🔥 compute grid range directly
+        start_col = int(x // GRID_SIZE)
+        end_col = int((x + w) // GRID_SIZE)
 
-            # ✅ RECTANGLE OVERLAP CHECK (robust)
-            if not (
-                x + w < cx or
-                x > cx + cw or
-                y + h < cy or
-                y > cy + ch
-            ):
-                cell["word_ids"].append(word["id"])
+        start_row = int(y // GRID_SIZE)
+        end_row = int((y + h) // GRID_SIZE)
 
-    # 🔍 DEBUG
-    filled_cells = [c for c in grid if len(c["word_ids"]) > 0]
+        # 🔥 clamp (safety)
+        start_col = max(0, min(start_col, cols - 1))
+        end_col = max(0, min(end_col, cols - 1))
+
+        start_row = max(0, min(start_row, rows - 1))
+        end_row = max(0, min(end_row, rows - 1))
+
+        # 🔥 assign to ALL overlapping cells
+        for r in range(start_row, end_row + 1):
+            for c in range(start_col, end_col + 1):
+                index = r * cols + c
+                grid[index]["word_ids"].append(word["id"])
+
+    # DEBUG
+    filled_cells = [c for c in grid if c["word_ids"]]
     print(f"✅ Cells with words: {len(filled_cells)}")
 
 
@@ -76,9 +77,6 @@ async def extract_grid(file: UploadFile = File(...)):
 
     for page_num, page in enumerate(doc):
 
-        # -------------------------
-        # STEP 1: WORD EXTRACTION
-        # -------------------------
         words_raw = page.get_text("words")
         print(f"📄 Page {page_num+1} → words extracted: {len(words_raw)}")
 
@@ -99,35 +97,31 @@ async def extract_grid(file: UploadFile = File(...)):
                 }
             })
 
-        # -------------------------
-        # STEP 2: BUILD GRID
-        # -------------------------
         page_width = page.rect.width
         page_height = page.rect.height
 
-        grid, total_rows, total_cols = build_full_grid(page_width, page_height)
+        grid, rows, cols = build_full_grid(page_width, page_height)
 
-        # -------------------------
-        # STEP 3: MAP WORDS
-        # -------------------------
-        map_words_to_grid(blocks, grid)
+        # 🔥 KEY FIX HERE
+        map_words_to_grid(blocks, grid, rows, cols)
 
-        # -------------------------
-        # FINAL RESPONSE
-        # -------------------------
+        filled_cells = [c for c in grid if c["word_ids"]]
+        print(f"✅ Page {page_num+1} → cells with words: {len(filled_cells)}")
+
+        if len(words_raw) > 0 and len(filled_cells) == 0:
+            print("🚨 WARNING: mapping failed")
+
         response_pages.append({
             "page": page_num + 1,
             "page_meta": {
                 "width": page_width,
                 "height": page_height,
                 "grid_size": GRID_SIZE,
-                "rows": total_rows,
-                "cols": total_cols
+                "rows": rows,
+                "cols": cols
             },
             "blocks": blocks,
             "grid": grid
         })
 
-    return {
-        "pages": response_pages
-    }
+    return {"pages": response_pages}
