@@ -3,32 +3,62 @@ import fitz  # PyMuPDF
 
 app = FastAPI()
 
+# -------------------------
+# 🔥 GRID SIZE (core control)
+# -------------------------
+GRID_SIZE = 20
+
 
 # -------------------------
-# 🔥 NEW: FIELD EXTRACTION
+# 🟦 BUILD FULL GRID
 # -------------------------
-def extract_fields(logical_grid):
-    fields = []
+def build_full_grid(page_width, page_height):
+    rows = int(page_height // GRID_SIZE)
+    cols = int(page_width // GRID_SIZE)
 
-    for row in logical_grid:
-        cells = row["cells"]
+    grid = []
 
-        if len(cells) >= 2:
-            field_name = " ".join(cells[:-1])
-            field_value = cells[-1]
-
-            fields.append({
-                "field": field_name.strip(),
-                "value": field_value.strip()
+    for r in range(rows):
+        for c in range(cols):
+            grid.append({
+                "row": r,
+                "col": c,
+                "bbox": {
+                    "x": c * GRID_SIZE,
+                    "y": r * GRID_SIZE,
+                    "width": GRID_SIZE,
+                    "height": GRID_SIZE
+                },
+                "word_ids": []
             })
 
-        elif len(cells) == 1:
-            fields.append({
-                "field": cells[0].strip(),
-                "value": ""
-            })
+    return grid, rows, cols
 
-    return fields
+
+# -------------------------
+# 🟨 MAP WORDS → GRID CELLS
+# -------------------------
+def map_words_to_grid(blocks, grid):
+    for word in blocks:
+        x = word["bbox"]["x"]
+        y = word["bbox"]["y"]
+        w = word["bbox"]["width"]
+        h = word["bbox"]["height"]
+
+        for cell in grid:
+            cx = cell["bbox"]["x"]
+            cy = cell["bbox"]["y"]
+            cw = cell["bbox"]["width"]
+            ch = cell["bbox"]["height"]
+
+            # overlap check
+            if not (
+                x + w < cx or
+                x > cx + cw or
+                y + h < cy or
+                y > cy + ch
+            ):
+                cell["word_ids"].append(word["id"])
 
 
 @app.post("/extract-grid")
@@ -63,70 +93,32 @@ async def extract_grid(file: UploadFile = File(...)):
             })
 
         # -------------------------
-        # STEP 2: LOGICAL GRID
+        # STEP 2: BUILD GRID
         # -------------------------
-        blocks_sorted = sorted(
-            blocks,
-            key=lambda w: (round(w["bbox"]["y"], 1), w["bbox"]["x"])
-        )
+        page_width = page.rect.width
+        page_height = page.rect.height
 
-        rows = []
-        threshold = 12
-
-        for word in blocks_sorted:
-            y = word["bbox"]["y"]
-            placed = False
-
-            for row in rows:
-                if abs(row["y"] - y) < threshold:
-                    row["words"].append(word)
-                    row["y"] = (row["y"] + y) / 2  # stabilize
-                    placed = True
-                    break
-
-            if not placed:
-                rows.append({
-                    "y": y,
-                    "words": [word]
-                })
-
-        logical_grid = []
-
-        for i, row in enumerate(rows):
-            sorted_words = sorted(row["words"], key=lambda w: w["bbox"]["x"])
-
-            logical_grid.append({
-                "row_id": i,
-                "cells": [w["text"] for w in sorted_words],
-                "text": " ".join([w["text"] for w in sorted_words])
-            })
+        grid, total_rows, total_cols = build_full_grid(page_width, page_height)
 
         # -------------------------
-        # 🔥 STEP 3: FIELD EXTRACTION
+        # STEP 3: MAP WORDS TO GRID
         # -------------------------
-        fields = extract_fields(logical_grid)
-
-        # -------------------------
-        # STEP 4: PIXEL GRID (UI)
-        # -------------------------
-        pixel_grid = []
-
-        for i, word in enumerate(blocks):
-            pixel_grid.append({
-                "id": f"cell_{i}",
-                "text": word["text"],
-                "bbox": word["bbox"]
-            })
+        map_words_to_grid(blocks, grid)
 
         # -------------------------
         # FINAL RESPONSE
         # -------------------------
         response_pages.append({
             "page": page_num + 1,
+            "page_meta": {
+                "width": page_width,
+                "height": page_height,
+                "grid_size": GRID_SIZE,
+                "rows": total_rows,
+                "cols": total_cols
+            },
             "blocks": blocks,
-            "logical_grid": logical_grid,
-            "fields": fields,  # 🔥 NEW OUTPUT
-            "pixel_grid": pixel_grid
+            "grid": grid  # 🔥 CORE OUTPUT
         })
 
     return {
