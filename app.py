@@ -36,31 +36,30 @@ def build_full_grid(page_width, page_height):
 
 
 # -------------------------
-# 🟨 MAP WORDS → GRID CELLS (FINAL FIX)
+# 🟨 MAP WORDS → GRID CELLS (UPDATED FIX)
 # -------------------------
-def map_words_to_grid(blocks, grid):
+def map_words_to_grid(blocks, grid, rows, cols):
     for word in blocks:
         x = word["bbox"]["x"]
         y = word["bbox"]["y"]
         w = word["bbox"]["width"]
         h = word["bbox"]["height"]
 
-        # ✅ Use CENTER POINT (reliable mapping)
+        # ✅ center point
         center_x = x + w / 2
         center_y = y + h / 2
 
-        for cell in grid:
-            cx = cell["bbox"]["x"]
-            cy = cell["bbox"]["y"]
-            cw = cell["bbox"]["width"]
-            ch = cell["bbox"]["height"]
+        # ✅ DIRECT GRID INDEX (no looping)
+        col = int(center_x // GRID_SIZE)
+        row = int(center_y // GRID_SIZE)
 
-            if (
-                cx <= center_x <= cx + cw and
-                cy <= center_y <= cy + ch
-            ):
-                cell["word_ids"].append(word["id"])
-                break  # ✅ prevent duplicate mapping
+        # ✅ bounds safety
+        if 0 <= row < rows and 0 <= col < cols:
+            index = row * cols + col
+            grid[index]["word_ids"].append(word["id"])
+
+            # 🔍 DEBUG (optional - keep for now)
+            # print(f"Mapped word {word['id']} → row {row}, col {col}")
 
 
 @app.post("/extract-grid")
@@ -105,7 +104,7 @@ async def extract_grid(file: UploadFile = File(...)):
         # -------------------------
         # STEP 3: MAP WORDS TO GRID
         # -------------------------
-        map_words_to_grid(blocks, grid)
+        map_words_to_grid(blocks, grid, total_rows, total_cols)
 
         # -------------------------
         # 🔍 DEBUG CHECK (optional)
