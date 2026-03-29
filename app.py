@@ -4,17 +4,17 @@ import fitz  # PyMuPDF
 app = FastAPI()
 
 # -------------------------
-# 🔥 GRID SIZE (core control)
+# 🔥 GRID SIZE
 # -------------------------
 GRID_SIZE = 20
 
 
 # -------------------------
-# 🟦 BUILD FULL GRID (FIXED COVERAGE)
+# 🟦 BUILD FULL GRID
 # -------------------------
 def build_full_grid(page_width, page_height):
-    rows = int(page_height // GRID_SIZE) + 1   # ✅ FIX: ensure full coverage
-    cols = int(page_width // GRID_SIZE) + 1    # ✅ FIX
+    rows = int(page_height // GRID_SIZE) + 1
+    cols = int(page_width // GRID_SIZE) + 1
 
     grid = []
 
@@ -36,11 +36,9 @@ def build_full_grid(page_width, page_height):
 
 
 # -------------------------
-# 🟨 MAP WORDS → GRID CELLS (FINAL FIX)
+# 🟨 FINAL MAPPING (ROBUST)
 # -------------------------
-def map_words_to_grid(blocks, grid, rows, cols):
-
-    unmapped_words = 0
+def map_words_to_grid(blocks, grid):
 
     for word in blocks:
         x = word["bbox"]["x"]
@@ -48,50 +46,25 @@ def map_words_to_grid(blocks, grid, rows, cols):
         w = word["bbox"]["width"]
         h = word["bbox"]["height"]
 
-        center_x = x + w / 2
-        center_y = y + h / 2
+        # 🔥 use word rectangle (not just center)
+        for cell in grid:
+            cx = cell["bbox"]["x"]
+            cy = cell["bbox"]["y"]
+            cw = cell["bbox"]["width"]
+            ch = cell["bbox"]["height"]
 
-        col = int(center_x // GRID_SIZE)
-        row = int(center_y // GRID_SIZE)
+            # ✅ RECTANGLE OVERLAP CHECK (robust)
+            if not (
+                x + w < cx or
+                x > cx + cw or
+                y + h < cy or
+                y > cy + ch
+            ):
+                cell["word_ids"].append(word["id"])
 
-        mapped = False
-
-        # -------------------------
-        # ⚡ FAST PATH
-        # -------------------------
-        if 0 <= row < rows and 0 <= col < cols:
-            index = row * cols + col
-
-            if index < len(grid):
-                grid[index]["word_ids"].append(word["id"])
-                mapped = True
-
-        # -------------------------
-        # 🔥 FALLBACK (CRITICAL)
-        # -------------------------
-        if not mapped:
-            for cell in grid:
-                cx = cell["bbox"]["x"]
-                cy = cell["bbox"]["y"]
-                cw = cell["bbox"]["width"]
-                ch = cell["bbox"]["height"]
-
-                if (
-                    cx <= center_x <= cx + cw and
-                    cy <= center_y <= cy + ch
-                ):
-                    cell["word_ids"].append(word["id"])
-                    mapped = True
-                    break
-
-        # -------------------------
-        # ❌ DEBUG: UNMAPPED WORDS
-        # -------------------------
-        if not mapped:
-            unmapped_words += 1
-            print(f"❌ Word not mapped: {word['text']} at ({center_x}, {center_y})")
-
-    print(f"⚠️ Total unmapped words: {unmapped_words}")
+    # 🔍 DEBUG
+    filled_cells = [c for c in grid if len(c["word_ids"]) > 0]
+    print(f"✅ Cells with words: {len(filled_cells)}")
 
 
 @app.post("/extract-grid")
@@ -107,7 +80,6 @@ async def extract_grid(file: UploadFile = File(...)):
         # STEP 1: WORD EXTRACTION
         # -------------------------
         words_raw = page.get_text("words")
-
         print(f"📄 Page {page_num+1} → words extracted: {len(words_raw)}")
 
         blocks = []
@@ -136,22 +108,9 @@ async def extract_grid(file: UploadFile = File(...)):
         grid, total_rows, total_cols = build_full_grid(page_width, page_height)
 
         # -------------------------
-        # STEP 3: MAP WORDS TO GRID
+        # STEP 3: MAP WORDS
         # -------------------------
-        map_words_to_grid(blocks, grid, total_rows, total_cols)
-
-        # -------------------------
-        # 🔍 DEBUG CHECK
-        # -------------------------
-        filled_cells = [c for c in grid if len(c["word_ids"]) > 0]
-
-        print(f"✅ Page {page_num+1} → cells with words: {len(filled_cells)}")
-
-        # -------------------------
-        # 🚨 CRITICAL CHECK
-        # -------------------------
-        if len(words_raw) > 0 and len(filled_cells) == 0:
-            print("🚨 WARNING: Words exist but no cells mapped → CHECK PDF TYPE")
+        map_words_to_grid(blocks, grid)
 
         # -------------------------
         # FINAL RESPONSE
