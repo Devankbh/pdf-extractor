@@ -4,6 +4,33 @@ import fitz  # PyMuPDF
 app = FastAPI()
 
 
+# -------------------------
+# 🔥 NEW: FIELD EXTRACTION
+# -------------------------
+def extract_fields(logical_grid):
+    fields = []
+
+    for row in logical_grid:
+        cells = row["cells"]
+
+        if len(cells) >= 2:
+            field_name = " ".join(cells[:-1])
+            field_value = cells[-1]
+
+            fields.append({
+                "field": field_name.strip(),
+                "value": field_value.strip()
+            })
+
+        elif len(cells) == 1:
+            fields.append({
+                "field": cells[0].strip(),
+                "value": ""
+            })
+
+    return fields
+
+
 @app.post("/extract-grid")
 async def extract_grid(file: UploadFile = File(...)):
     contents = await file.read()
@@ -36,30 +63,24 @@ async def extract_grid(file: UploadFile = File(...)):
             })
 
         # -------------------------
-        # STEP 2: LOGICAL GRID (FIXED)
+        # STEP 2: LOGICAL GRID
         # -------------------------
-
-        # 🔥 Sort properly: first by Y (rounded), then X
         blocks_sorted = sorted(
             blocks,
             key=lambda w: (round(w["bbox"]["y"], 1), w["bbox"]["x"])
         )
 
         rows = []
-        threshold = 12  # 🔥 Increased tolerance
+        threshold = 12
 
         for word in blocks_sorted:
             y = word["bbox"]["y"]
-
             placed = False
 
             for row in rows:
                 if abs(row["y"] - y) < threshold:
                     row["words"].append(word)
-
-                    # 🔥 Stabilize row alignment
-                    row["y"] = (row["y"] + y) / 2
-
+                    row["y"] = (row["y"] + y) / 2  # stabilize
                     placed = True
                     break
 
@@ -69,7 +90,6 @@ async def extract_grid(file: UploadFile = File(...)):
                     "words": [word]
                 })
 
-        # 🔥 Build logical grid (clean rows)
         logical_grid = []
 
         for i, row in enumerate(rows):
@@ -78,13 +98,16 @@ async def extract_grid(file: UploadFile = File(...)):
             logical_grid.append({
                 "row_id": i,
                 "cells": [w["text"] for w in sorted_words],
-
-                # OPTIONAL (keep for debugging)
                 "text": " ".join([w["text"] for w in sorted_words])
             })
 
         # -------------------------
-        # STEP 3: PIXEL GRID (UI)
+        # 🔥 STEP 3: FIELD EXTRACTION
+        # -------------------------
+        fields = extract_fields(logical_grid)
+
+        # -------------------------
+        # STEP 4: PIXEL GRID (UI)
         # -------------------------
         pixel_grid = []
 
@@ -96,12 +119,13 @@ async def extract_grid(file: UploadFile = File(...)):
             })
 
         # -------------------------
-        # FINAL RESPONSE PER PAGE
+        # FINAL RESPONSE
         # -------------------------
         response_pages.append({
             "page": page_num + 1,
             "blocks": blocks,
             "logical_grid": logical_grid,
+            "fields": fields,  # 🔥 NEW OUTPUT
             "pixel_grid": pixel_grid
         })
 
