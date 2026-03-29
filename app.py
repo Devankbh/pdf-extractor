@@ -36,7 +36,7 @@ def build_full_grid(page_width, page_height):
 
 
 # -------------------------
-# 🟨 MAP WORDS → GRID CELLS
+# 🟨 MAP WORDS → GRID CELLS (FINAL FIX)
 # -------------------------
 def map_words_to_grid(blocks, grid):
     for word in blocks:
@@ -45,20 +45,22 @@ def map_words_to_grid(blocks, grid):
         w = word["bbox"]["width"]
         h = word["bbox"]["height"]
 
+        # ✅ Use CENTER POINT (reliable mapping)
+        center_x = x + w / 2
+        center_y = y + h / 2
+
         for cell in grid:
             cx = cell["bbox"]["x"]
             cy = cell["bbox"]["y"]
             cw = cell["bbox"]["width"]
             ch = cell["bbox"]["height"]
 
-            # overlap check
-            if not (
-                x + w < cx or
-                x > cx + cw or
-                y + h < cy or
-                y > cy + ch
+            if (
+                cx <= center_x <= cx + cw and
+                cy <= center_y <= cy + ch
             ):
                 cell["word_ids"].append(word["id"])
+                break  # ✅ prevent duplicate mapping
 
 
 @app.post("/extract-grid")
@@ -106,6 +108,12 @@ async def extract_grid(file: UploadFile = File(...)):
         map_words_to_grid(blocks, grid)
 
         # -------------------------
+        # 🔍 DEBUG CHECK (optional)
+        # -------------------------
+        filled_cells = [c for c in grid if len(c["word_ids"]) > 0]
+        print(f"Page {page_num+1} → cells with words: {len(filled_cells)}")
+
+        # -------------------------
         # FINAL RESPONSE
         # -------------------------
         response_pages.append({
@@ -118,7 +126,7 @@ async def extract_grid(file: UploadFile = File(...)):
                 "cols": total_cols
             },
             "blocks": blocks,
-            "grid": grid  # 🔥 CORE OUTPUT
+            "grid": grid
         })
 
     return {
