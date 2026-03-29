@@ -36,14 +36,17 @@ async def extract_grid(file: UploadFile = File(...)):
             })
 
         # -------------------------
-        # STEP 2: LOGICAL GRID (IMPROVED)
+        # STEP 2: LOGICAL GRID (FIXED)
         # -------------------------
 
-        # Sort words top → bottom first
-        blocks_sorted = sorted(blocks, key=lambda w: w["bbox"]["y"])
+        # 🔥 Sort properly: first by Y (rounded), then X
+        blocks_sorted = sorted(
+            blocks,
+            key=lambda w: (round(w["bbox"]["y"], 1), w["bbox"]["x"])
+        )
 
         rows = []
-        threshold = 8  # tweak if needed
+        threshold = 12  # 🔥 Increased tolerance
 
         for word in blocks_sorted:
             y = word["bbox"]["y"]
@@ -51,8 +54,12 @@ async def extract_grid(file: UploadFile = File(...)):
             placed = False
 
             for row in rows:
-                if abs(row["y"] - y) <= threshold:
+                if abs(row["y"] - y) < threshold:
                     row["words"].append(word)
+
+                    # 🔥 Stabilize row alignment
+                    row["y"] = (row["y"] + y) / 2
+
                     placed = True
                     break
 
@@ -62,7 +69,7 @@ async def extract_grid(file: UploadFile = File(...)):
                     "words": [word]
                 })
 
-        # Now sort each row left → right
+        # 🔥 Build logical grid (clean rows)
         logical_grid = []
 
         for i, row in enumerate(rows):
@@ -70,7 +77,10 @@ async def extract_grid(file: UploadFile = File(...)):
 
             logical_grid.append({
                 "row_id": i,
-                "cells": [w["text"] for w in sorted_words]
+                "cells": [w["text"] for w in sorted_words],
+
+                # OPTIONAL (keep for debugging)
+                "text": " ".join([w["text"] for w in sorted_words])
             })
 
         # -------------------------
