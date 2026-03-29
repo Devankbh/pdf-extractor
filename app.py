@@ -7,7 +7,7 @@ GRID_SIZE = 20
 
 
 # -------------------------
-# GRID BUILD
+# 🟦 BUILD FULL GRID
 # -------------------------
 def build_full_grid(page_width, page_height):
     rows = int(page_height // GRID_SIZE) + 1
@@ -27,14 +27,15 @@ def build_full_grid(page_width, page_height):
                     "height": GRID_SIZE
                 },
                 "word_ids": [],
-                "text": ""  # 🔥 added
+                "text": "",
+                "block_ids": []   # 🔥 NEW
             })
 
     return grid, rows, cols
 
 
 # -------------------------
-# MAP WORDS → GRID CELLS
+# 🟨 MAP WORDS → GRID
 # -------------------------
 def map_words_to_grid(blocks, grid, rows, cols):
 
@@ -52,21 +53,17 @@ def map_words_to_grid(blocks, grid, rows, cols):
 
         start_col = max(0, min(start_col, cols - 1))
         end_col = max(0, min(end_col, cols - 1))
-
         start_row = max(0, min(start_row, rows - 1))
         end_row = max(0, min(end_row, rows - 1))
 
         for r in range(start_row, end_row + 1):
             for c in range(start_col, end_col + 1):
-                index = r * cols + c
-                grid[index]["word_ids"].append(word["id"])
-
-    filled_cells = [c for c in grid if c["word_ids"]]
-    print(f"✅ Cells with words: {len(filled_cells)}")
+                idx = r * cols + c
+                grid[idx]["word_ids"].append(word["id"])
 
 
 # -------------------------
-# 🔥 ADD TEXT INTO GRID CELLS (FINAL STEP)
+# 🔥 ENRICH GRID WITH TEXT
 # -------------------------
 def enrich_grid_with_text(grid, blocks):
     block_map = {b["id"]: b["text"] for b in blocks}
@@ -74,6 +71,68 @@ def enrich_grid_with_text(grid, blocks):
     for cell in grid:
         texts = [block_map.get(wid, "") for wid in cell["word_ids"]]
         cell["text"] = " ".join(texts).strip()
+
+
+# -------------------------
+# 🟦 BUILD BLOCKS (GROUP WORDS)
+# -------------------------
+def build_blocks(blocks):
+    rows = {}
+
+    for word in blocks:
+        y_key = round(word["bbox"]["y"] / 10)
+
+        if y_key not in rows:
+            rows[y_key] = []
+
+        rows[y_key].append(word)
+
+    block_list = []
+    block_id = 0
+
+    for y in sorted(rows.keys()):
+        words = sorted(rows[y], key=lambda w: w["bbox"]["x"])
+
+        text = " ".join([w["text"] for w in words])
+
+        block_list.append({
+            "block_id": f"b_{block_id}",
+            "text": text,
+            "words": words
+        })
+
+        block_id += 1
+
+    return block_list
+
+
+# -------------------------
+# 🔥 MAP BLOCKS → GRID
+# -------------------------
+def map_blocks_to_grid(blocks_structured, grid, rows, cols):
+
+    for block in blocks_structured:
+        for word in block["words"]:
+            x = word["bbox"]["x"]
+            y = word["bbox"]["y"]
+            w = word["bbox"]["width"]
+            h = word["bbox"]["height"]
+
+            start_col = int(x // GRID_SIZE)
+            end_col = int((x + w) // GRID_SIZE)
+
+            start_row = int(y // GRID_SIZE)
+            end_row = int((y + h) // GRID_SIZE)
+
+            start_col = max(0, min(start_col, cols - 1))
+            end_col = max(0, min(end_col, cols - 1))
+            start_row = max(0, min(start_row, rows - 1))
+            end_row = max(0, min(end_row, rows - 1))
+
+            for r in range(start_row, end_row + 1):
+                for c in range(start_col, end_col + 1):
+                    idx = r * cols + c
+                    grid[idx]["block_ids"].append(block["block_id"])
 
 
 @app.post("/extract-grid")
@@ -85,6 +144,9 @@ async def extract_grid(file: UploadFile = File(...)):
 
     for page_num, page in enumerate(doc):
 
+        # -------------------------
+        # STEP 1: WORD EXTRACTION
+        # -------------------------
         words_raw = page.get_text("words")
         print(f"📄 Page {page_num+1} → words extracted: {len(words_raw)}")
 
@@ -105,23 +167,43 @@ async def extract_grid(file: UploadFile = File(...)):
                 }
             })
 
+        # -------------------------
+        # STEP 2: BUILD GRID
+        # -------------------------
         page_width = page.rect.width
         page_height = page.rect.height
 
         grid, rows, cols = build_full_grid(page_width, page_height)
 
-        # 🔥 mapping
+        # -------------------------
+        # STEP 3: MAP WORDS
+        # -------------------------
         map_words_to_grid(blocks, grid, rows, cols)
 
-        # 🔥 FINAL STEP (text in cells)
+        # -------------------------
+        # STEP 4: ADD TEXT
+        # -------------------------
         enrich_grid_with_text(grid, blocks)
 
-        filled_cells = [c for c in grid if c["word_ids"]]
-        print(f"✅ Page {page_num+1} → cells with words: {len(filled_cells)}")
+        # -------------------------
+        # 🔥 STEP 5: BUILD BLOCKS
+        # -------------------------
+        blocks_structured = build_blocks(blocks)
 
-        if len(words_raw) > 0 and len(filled_cells) == 0:
-            print("🚨 WARNING: mapping failed")
+        # -------------------------
+        # 🔥 STEP 6: MAP BLOCKS
+        # -------------------------
+        map_blocks_to_grid(blocks_structured, grid, rows, cols)
 
+        # -------------------------
+        # DEBUG
+        # -------------------------
+        filled_cells = [c for c in grid if c["text"]]
+        print(f"✅ Page {page_num+1} → cells with text: {len(filled_cells)}")
+
+        # -------------------------
+        # FINAL RESPONSE
+        # -------------------------
         response_pages.append({
             "page": page_num + 1,
             "page_meta": {
@@ -132,6 +214,7 @@ async def extract_grid(file: UploadFile = File(...)):
                 "cols": cols
             },
             "blocks": blocks,
+            "blocks_structured": blocks_structured,   # 🔥 NEW
             "grid": grid
         })
 
