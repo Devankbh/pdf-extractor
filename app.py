@@ -26,14 +26,15 @@ def build_full_grid(page_width, page_height):
                     "width": GRID_SIZE,
                     "height": GRID_SIZE
                 },
-                "word_ids": []
+                "word_ids": [],
+                "text": ""  # 🔥 added
             })
 
     return grid, rows, cols
 
 
 # -------------------------
-# 🔥 FINAL MAPPING (RECTANGLE → GRID RANGE)
+# MAP WORDS → GRID CELLS
 # -------------------------
 def map_words_to_grid(blocks, grid, rows, cols):
 
@@ -43,29 +44,36 @@ def map_words_to_grid(blocks, grid, rows, cols):
         w = word["bbox"]["width"]
         h = word["bbox"]["height"]
 
-        # 🔥 compute grid range directly
         start_col = int(x // GRID_SIZE)
         end_col = int((x + w) // GRID_SIZE)
 
         start_row = int(y // GRID_SIZE)
         end_row = int((y + h) // GRID_SIZE)
 
-        # 🔥 clamp (safety)
         start_col = max(0, min(start_col, cols - 1))
         end_col = max(0, min(end_col, cols - 1))
 
         start_row = max(0, min(start_row, rows - 1))
         end_row = max(0, min(end_row, rows - 1))
 
-        # 🔥 assign to ALL overlapping cells
         for r in range(start_row, end_row + 1):
             for c in range(start_col, end_col + 1):
                 index = r * cols + c
                 grid[index]["word_ids"].append(word["id"])
 
-    # DEBUG
     filled_cells = [c for c in grid if c["word_ids"]]
     print(f"✅ Cells with words: {len(filled_cells)}")
+
+
+# -------------------------
+# 🔥 ADD TEXT INTO GRID CELLS (FINAL STEP)
+# -------------------------
+def enrich_grid_with_text(grid, blocks):
+    block_map = {b["id"]: b["text"] for b in blocks}
+
+    for cell in grid:
+        texts = [block_map.get(wid, "") for wid in cell["word_ids"]]
+        cell["text"] = " ".join(texts).strip()
 
 
 @app.post("/extract-grid")
@@ -102,8 +110,11 @@ async def extract_grid(file: UploadFile = File(...)):
 
         grid, rows, cols = build_full_grid(page_width, page_height)
 
-        # 🔥 KEY FIX HERE
+        # 🔥 mapping
         map_words_to_grid(blocks, grid, rows, cols)
+
+        # 🔥 FINAL STEP (text in cells)
+        enrich_grid_with_text(grid, blocks)
 
         filled_cells = [c for c in grid if c["word_ids"]]
         print(f"✅ Page {page_num+1} → cells with words: {len(filled_cells)}")
